@@ -72,9 +72,3 @@ Numbers, baseline comparisons, and ablation results are in [`report.md`](./scrip
 
 - Only about 6.7% of users actually take the action in this synthetic dataset, so training uses a softened class weight and the decision threshold gets tuned on the validation set instead of just using 0.5.
 - Ego networks are capped at a fixed size, so going beyond 2 hops usually doesn't add anything — the neighborhood's already full.
-
-## References
-
-- Qiu et al., *DeepInf: Social Influence Prediction with Deep Learning*, KDD 2018
-- Perozzi et al., *DeepWalk: Online Learning of Social Representations*, KDD 2014
-- Grover & Leskovec, *node2vec: Scalable Feature Learning for Networks*, KDD 2016
