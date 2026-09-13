@@ -1,29 +1,18 @@
-# Social Influence Prediction — GNN-Based Modeling of Peer Behavior
+# Social Influence Prediction (GNN)
 
-A DeepInf-style pipeline that predicts whether a user will perform an action
-(ad view, product adoption, repost, etc.) based on their local social
-neighborhood's behavior. Given an ego user *v* and a sampled subgraph around
-them, a GNN encoder (GAT/GCN) learns an embedding of *v*'s social context,
-which is fused with handcrafted structural/behavioral features and fed into
-an MLP to predict the probability *v* takes the action.
+Predicts whether a user will take an action (adopting a product, reposting something, clicking an ad) based on what their friends/neighbors have already done. Sample a small neighborhood around a user, encode it with a graph neural net, mix in some hand-picked social features, and pass it through a classifier.
 
-Built entirely in PyTorch, without `torch_geometric` — GCN/GAT message
-passing is implemented directly with scatter operations, avoiding
-version-matching issues with `torch-scatter`/`torch-sparse`.
+Loosely based on the DeepInf paper. No `torch_geometric` — GCN/GAT layers are written from scratch with basic scatter operations, mainly to dodge the torch-scatter/torch-sparse version headaches.
 
-## Pipeline (maps to problem statement sections)
+## How it works
 
-| Step | File | PS Section |
-|---|---|---|
-| Synthetic graph + cascade simulation | `generate_data.py` | 3 (Dataset) |
-| Ego network sampling (k-hop BFS) | `sample_ego_networks.py` | 2.1 |
-| GNN encoder (GCN/GAT) + instance norm | `model.py` | 2.2, 2.3 |
-| Handcrafted features + fusion + prediction head | `features_and_head.py` | 2.4, 2.5 |
-| Training (BCE loss, end-to-end) | `train.py` | 2.7 |
-| Baselines (LogReg, Node2Vec+MLP, Plain GAT) | `baselines.py` | 4 |
-| Ablations + k-hop sensitivity | `ablation.py` | 5 |
-| Threshold tuning (precision/recall balance) | `tune_threshold.py` | — |
-| Auto-generated report | `generate_report.py` → `report.md` | 6 (Report) |
+1. Generate a synthetic social graph and simulate an action spreading through it (independent cascade model) — this gives us ground-truth labels.
+2. For every user, pull out their local k-hop neighborhood.
+3. Run that neighborhood through a GNN encoder (GCN or GAT) to get an embedding.
+4. Concatenate that embedding with some handcrafted features — degree, clustering coefficient, fraction of active neighbors, etc.
+5. Feed it all into a small MLP that outputs a probability.
+
+There's also a Logistic Regression baseline, a Node2Vec + MLP baseline, and a plain-GNN-without-handcrafted-features version, so the full model has something to be compared against.
 
 ## Setup
 
@@ -35,32 +24,31 @@ python -m venv .venv
 pip install torch networkx numpy scikit-learn gensim
 ```
 
-## Running the pipeline
+## Running it
 
-Run once, in order, to build the dataset and verify each stage:
-
-```bash
-python generate_data.py          # builds the synthetic graph + cascade labels
-python sample_ego_networks.py    # extracts k-hop ego networks per node
-python model.py                  # sanity-checks the GNN encoder
-python features_and_head.py      # computes handcrafted features, checks fusion model
-python train.py                  # trains the full model, saves models/full_model.pt
-python baselines.py              # runs Logistic Regression, Node2Vec+MLP, Plain GAT
-python ablation.py               # runs feature/instance-norm/k-hop ablations
-python tune_threshold.py         # tunes the decision threshold for better F1
-```
-
-After that, regenerate the full report any time (e.g. after retraining or
-changing a hyperparameter):
+In order, first time through:
 
 ```bash
-python generate_report.py        # writes report.md + appends to results_history.json
+python generate_data.py          # builds the graph + cascade labels
+python sample_ego_networks.py    # extracts each user's local neighborhood
+python model.py                  # quick check the GNN encoder works
+python features_and_head.py      # handcrafted features + fusion model
+python train.py                  # trains the full model
+python baselines.py              # Logistic Regression / Node2Vec / plain GAT
+python ablation.py               # feature ablations + k-hop sensitivity
+python tune_threshold.py         # better precision/recall tradeoff
 ```
 
-## Repo structure
+Then whenever you retrain or tweak something:
+
+```bash
+python generate_report.py        # regenerates report.md with fresh numbers
+```
+
+## Structure
 
 ```
-GNNProject/
+scripts/
 ├── generate_data.py
 ├── sample_ego_networks.py
 ├── model.py
@@ -70,36 +58,23 @@ GNNProject/
 ├── ablation.py
 ├── tune_threshold.py
 ├── generate_report.py
-├── requirements.txt
-├── data/                    # generated: graph, ego networks, features
-├── models/                  # generated: trained weights (full_model.pt)
-├── report.md                # generated: latest results, tables, ablations
-└── results_history.json     # generated: metrics from every report run
+├── data/            (generated)
+├── models/          (generated)
+├── report.md        (generated)
+└── results_history.json (generated)
 ```
 
 ## Results
 
-See [`report.md`](./report.md) for the current numbers — dataset stats,
-full-model performance, baseline comparison table, and ablation results.
-It's regenerated by `generate_report.py`, so it always reflects the latest
-trained model.
+Numbers, baseline comparisons, and ablation results are in [`report.md`](./scripts/report.md) — it gets rewritten every time `generate_report.py` runs, so it always matches whatever's currently trained.
 
-## Key design notes
+## Notes
 
-- **Dataset**: synthetic Barabási–Albert graph with an Independent Cascade
-  simulation for action labels (per PS section 3's allowance for synthetic
-  data with simulated cascades).
-- **Class imbalance**: only ~6.7% of nodes activate, so training uses a
-  softened class weight (`sqrt(num_neg/num_pos)`) and the decision threshold
-  is tuned on the validation set rather than fixed at 0.5.
-- **No `torch_geometric`**: GCN/GAT layers are hand-implemented with
-  `scatter_add`, avoiding the torch-scatter/torch-sparse dependency chain.
+- Only about 6.7% of users actually take the action in this synthetic dataset, so training uses a softened class weight and the decision threshold gets tuned on the validation set instead of just using 0.5.
+- Ego networks are capped at a fixed size, so going beyond 2 hops usually doesn't add anything — the neighborhood's already full.
 
 ## References
 
-- Qiu, J. et al. (2018). *DeepInf: Social Influence Prediction with Deep
-  Learning.* KDD.
-- Perozzi, B. et al. (2014). *DeepWalk: Online Learning of Social
-  Representations.* KDD.
-- Grover, A., & Leskovec, J. (2016). *node2vec: Scalable Feature Learning
-  for Networks.* KDD.
+- Qiu et al., *DeepInf: Social Influence Prediction with Deep Learning*, KDD 2018
+- Perozzi et al., *DeepWalk: Online Learning of Social Representations*, KDD 2014
+- Grover & Leskovec, *node2vec: Scalable Feature Learning for Networks*, KDD 2016
